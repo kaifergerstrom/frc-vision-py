@@ -20,7 +20,7 @@ class ImageProcessor:
 		else:
 			mask = cv2.inRange(hsv, self.THRESH_LOW, self.THRESH_HIGH)  # Filter HSV range
 
-		mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.morph_kernel, iterations=1)  # Apply noise reduction
+		#mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.morph_kernel, iterations=1)  # Apply noise reduction
 		return mask  # Return mask
 
 
@@ -46,3 +46,11 @@ class ImageProcessor:
 			self.THRESH_HIGH = pickle.load(f)
 
 		return self.THRESH_LOW, self.THRESH_HIGH
+
+
+	def find_contours(self, img):
+
+		mask = self.threshold(img)
+
+		contours, hierarchy = cv2.findContours(mask, cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)
+		cnts = sorted(contours, key=cv2.contourArea, reverse=True)
