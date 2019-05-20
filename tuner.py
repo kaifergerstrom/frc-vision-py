@@ -4,7 +4,7 @@ import cv2
 from classes.ImageProcessor import ImageProcessor
 
 # Start the webcam feed, and start FPS counter
-vs = WebcamVideoStream(src=0).start()
+vs = WebcamVideoStream(src=1).start()
 fps = FPS().start()
 
 image_processor = ImageProcessor()  # Create an object of the ImageProcessor class
