@@ -3,7 +3,9 @@ import cv2
 import pickle
 import math
 import itertools
+import argparse
 import numpy as np
+from networktables import NetworkTables
 from imutils.video import WebcamVideoStream, FPS
 
 # ------------------ FUNCTIONS ------------------
@@ -64,6 +66,8 @@ def get_box_sides(cnt):
 
 # ------------------ INITIALIZE VARIABLES ------------------
 
+ROBORIO_IP = "10.6.12.2"
+
 PICKLE_PATH = "pickles/"  # Path of folders with pickles
 AREA_LIMIT = 1000  # Limit to find contours with area bigger than limit
 TOLERANCE = 15  # Angle tolerance to consider a "pair"
@@ -74,6 +78,14 @@ fps = FPS().start()
 
 MORPH_KERNEL = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2), anchor=(0,0))  # Define kernel
 
+ap = argparse.ArgumentParser()
+ap.add_argument("-d", "--display", type=int, default=-1, help="Whether or not frames should be displayed")
+ap.add_argument("-t", "--table", type=str, required=True, help="Determine the name of the NetworkTable to push to")
+args = vars(ap.parse_args())
+
+NetworkTables.initialize(server=ROBORIO_IP)  # Initialize NetworkTable server
+sd = NetworkTables.getTable(args["table"])  # Fetch the NetworkTable table
+
 previous = None
 
 # ------------------ MAIN LOOP ------------------
@@ -82,6 +94,8 @@ while True:
 
 	frame = vs.read()  # Fetch the frame from the camera
 	display = frame.copy() # Create a copy of frame for clear display and drawing
+
+	height, width = frame.shape[:2]
 
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)  # Convert into HSV readable
 
@@ -131,12 +145,18 @@ while True:
 				else:
 					prev_target = prev_box[1]
 
-				# Some drawing to display contour results
-				cv2.circle(display, tuple(current_target), 5, (0,123,255), thickness=1)
-				cv2.circle(display, tuple(prev_target), 5, (0,255,12), thickness=1)
-				cv2.line(display, tuple(current_target), tuple(prev_target), (255,255,255), 4)
-				cv2.line(display, tuple(current_box[0]), tuple(current_box[1]), (255,0,255), 2)
-				cv2.line(display, tuple(prev_box[0]), tuple(prev_box[1]), (255,0,0), 2)
+				if args["display"] > 0:
+					# Some drawing to display contour results
+					cv2.circle(display, tuple(current_target), 5, (255,0,0), thickness=1)
+					cv2.circle(display, tuple(prev_target), 5, (0,255,0), thickness=1)
+					cv2.line(display, tuple(current_target), tuple(prev_target), (0,0,255), 4)
+					cv2.line(display, (int(width/2), 0), (int(width/2), height), (0,0,0), 4)
+					cv2.line(display, tuple(current_box[0]), tuple(current_box[1]), (255,0,255), 2)
+					cv2.line(display, tuple(prev_box[0]), tuple(prev_box[1]), (255,255,0), 2)
+
+				tape_target = midpoint(current_target, prev_target)
+				offset = (width/2)+tape_target[0]
+				print(offset)
 
 		previous = cnt  # Re-assign the previous contour
 
@@ -157,6 +177,5 @@ print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
 
 cv2.destroyAllWindows()
 vs.stop()
+
 		
-
-
