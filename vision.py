@@ -10,6 +10,40 @@ from imutils.video import WebcamVideoStream, FPS
 
 # ------------------ FUNCTIONS ------------------
 
+def intersectLines(ptA, ptB, ptC, ptD): # Returns intersection point of Line(ptA, ptB) and Line(ptD, ptC)
+
+	DET_TOLERANCE = 0.00000001  # Define determent tolerance
+
+	# the first line is pt1 + r*(pt2-pt1)
+	# in component form:
+	x1, y1 = ptA;   x2, y2 = ptB
+	dx1 = x2 - x1;  dy1 = y2 - y1
+
+	# the second line is ptA + s*(ptB-ptA)
+	x, y = ptC;   xB, yB = ptD;
+	dx = xB - x;  dy = yB - y;
+
+	#    [ r ] = _1_  [  -dy   dx ] [ x-x1 ]
+	#    [ s ] = DET  [ -dy1  dx1 ] [ y-y1 ]
+	DET = (-dx1 * dy + dy1 * dx)  # Given matrix above solve for DET
+
+	if math.fabs(DET) < DET_TOLERANCE: return (0,0,0,0,0)
+
+	# Solve for the inverse of the determent
+	DETinv = 1.0/DET
+
+	# Find the scalar amount along the "self" segment
+	r = DETinv * (-dy  * (x-x1) +  dx * (y-y1))
+
+	# Find the scalar amount along the input line
+	s = DETinv * (-dy1 * (x-x1) + dx1 * (y-y1))
+
+	# Return the average of the two descriptions
+	xi = (x1 + r*dx1 + x + s*dx)/2.0
+	yi = (y1 + r*dy1 + y + s*dy)/2.0
+	return (int(xi), int(yi))
+
+
 def midpoint(p1, p2):  # Basic function to calculate the midpoint of two points
 	return (int((p1[0]+p2[0])/2), int((p1[1]+p2[1])/2))
 
@@ -63,6 +97,21 @@ def get_box_sides(cnt):
 	side2 = rect[1]
 
 	return side1, side2
+
+
+def find_targets(current_box, prev_box):
+	if (current_box[0][0] < current_box[1][0]):
+		current_target = current_box_top[0]
+	else:
+		current_target = current_box_top[1]
+
+	if (prev_box[0][0] > prev_box[1][0]):
+		prev_target = prev_box[0]
+	else:
+		prev_target = prev_box[1]
+
+	return tuple(current_target), tuple(prev_target)
+
 
 # ------------------ INITIALIZE VARIABLES ------------------
 
@@ -130,33 +179,51 @@ while True:
 			# Check if angles are within tolerance to be pair
 			if abs(abs(angle_prev) - abs(angle)) < 15:
 
-				# Determine which side of tape is the uppermost
-				current_box = side1c if side1c[0][1] < side2c[0][1] else side2c
-				prev_box = side1p if side1p[0][1] < side2p[0][1] else side2p
-
-				# Find the point closest to the other corner (upper corner) for each previous and current
-				if (current_box[0][0] < current_box[1][0]):
-					current_target = current_box[0]
+				# Determine which side of tape is the uppermost and farthest to left
+				if side1c[0][1] < side2c[0][1]:
+					current_box_top = side1c
+					current_box_bottom = side2c
+					prev_box_top = side1p
+					prev_box_bottom = side2p
 				else:
-					current_target = current_box[1]
+					current_box_top = side2c
+					current_box_bottom = side1p
+					prev_box_top = side2p
+					prev_box_bottom = side1p
 
-				if (prev_box[0][0] > prev_box[1][0]):
-					prev_target = prev_box[0]
-				else:
-					prev_target = prev_box[1]
+				# Determine the corner target points of each tape contour
+				current_target_top, prev_target_top = find_targets(current_box_top, prev_box_top)
+				current_target_bottom, prev_target_bottom = find_targets(current_box_bottom, prev_box_bottom)
+
+				# Data to send to network tables length of X lines and offset from intersection point of X lines
+				intersection = intersectLines(prev_target_bottom, current_target_top, current_target_bottom, prev_target_top)
+				leftDistance = distance(prev_target_bottom, current_target_top)
+				rightDistance = distance(current_target_bottom, prev_target_top)
+				offset = (width/2)-intersection[0]  # Calculate the offset from the center of the intersection point
+
+				# Pass the data through network tables
+				sd.putNumber("offset", offset)  # Push data to table
+				sd.putNumber("leftDistance", leftDistance)  # Push data to table
+				sd.putNumber("rightDistance", rightDistance)  # Push data to table
 
 				if args["display"] > 0:
 					# Some drawing to display contour results
-					cv2.circle(display, tuple(current_target), 5, (255,0,0), thickness=1)
-					cv2.circle(display, tuple(prev_target), 5, (0,255,0), thickness=1)
-					cv2.line(display, tuple(current_target), tuple(prev_target), (0,0,255), 4)
-					cv2.line(display, (int(width/2), 0), (int(width/2), height), (0,0,0), 4)
-					cv2.line(display, tuple(current_box[0]), tuple(current_box[1]), (255,0,255), 2)
-					cv2.line(display, tuple(prev_box[0]), tuple(prev_box[1]), (255,255,0), 2)
+					cv2.circle(display, prev_target_bottom, 5, (0,255,0), thickness=1)
+					cv2.circle(display, current_target_bottom, 5, (0,0,255), thickness=1)
+					cv2.line(display, current_target_bottom, prev_target_bottom, (0,0,255), 4)
 
-				tape_target = midpoint(current_target, prev_target)
-				offset = (width/2)+tape_target[0]
-				print(offset)
+					cv2.circle(display, prev_target_top, 5, (0,255,0), thickness=1)
+					cv2.circle(display, current_target_top, 5, (0,0,255), thickness=1)
+					cv2.line(display, current_target_top, prev_target_top, (0,0,255), 4)
+
+					cv2.line(display, prev_target_bottom, current_target_top, (255,255,255), 4)
+					cv2.line(display, current_target_bottom, prev_target_top, (0,0,255), 4)
+
+					cv2.line(display, (int(width/2), 0), (int(width/2), height), (0,0,0), 4)
+					cv2.line(display, tuple(current_box_top[0]), tuple(current_box_top[1]), (255,0,255), 2)
+					cv2.line(display, tuple(prev_box_top[0]), tuple(prev_box_top[1]), (255,255,0), 2)
+
+					cv2.circle(display, intersection, 5, (255,255,255), thickness=1)
 
 		previous = cnt  # Re-assign the previous contour
 
