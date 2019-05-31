@@ -101,9 +101,9 @@ def get_box_sides(cnt):
 
 def find_targets(current_box, prev_box):
 	if (current_box[0][0] < current_box[1][0]):
-		current_target = current_box_top[0]
+		current_target = current_box[0]
 	else:
-		current_target = current_box_top[1]
+		current_target = current_box[1]
 
 	if (prev_box[0][0] > prev_box[1][0]):
 		prev_target = prev_box[0]
@@ -181,15 +181,18 @@ while True:
 
 				# Determine which side of tape is the uppermost and farthest to left
 				if side1c[0][1] < side2c[0][1]:
-					current_box_top = side1c
 					current_box_bottom = side2c
-					prev_box_top = side1p
-					prev_box_bottom = side2p
+					current_box_top = side1c
 				else:
+					current_box_bottom = side1c
 					current_box_top = side2c
-					current_box_bottom = side1p
+
+				if side1p[0][1] > side2p[0][1]:
 					prev_box_top = side2p
 					prev_box_bottom = side1p
+				else:
+					prev_box_top = side1p
+					prev_box_bottom = side2p
 
 				# Determine the corner target points of each tape contour
 				current_target_top, prev_target_top = find_targets(current_box_top, prev_box_top)
@@ -199,14 +202,26 @@ while True:
 				intersection = intersectLines(prev_target_bottom, current_target_top, current_target_bottom, prev_target_top)
 				leftDistance = distance(prev_target_bottom, current_target_top)
 				rightDistance = distance(current_target_bottom, prev_target_top)
-				offset = (width/2)-intersection[0]  # Calculate the offset from the center of the intersection point
+				offset = intersection[0] - (width/2)  # Calculate the offset from the center of the intersection point
 
 				# Pass the data through network tables
 				sd.putNumber("offset", offset)  # Push data to table
 				sd.putNumber("leftDistance", leftDistance)  # Push data to table
 				sd.putNumber("rightDistance", rightDistance)  # Push data to table
 
+				print(offset)
+				print(leftDistance)
+				print(rightDistance)
+				print("-----------")
+
 				if args["display"] > 0:
+
+
+					cv2.circle(display, prev_target_bottom, 5, (255,0,0), thickness=1)
+					cv2.circle(display, current_target_top, 5, (0,255,0), thickness=1)
+					cv2.circle(display, current_target_bottom, 5, (0,0,0), thickness=1)
+					cv2.circle(display, prev_target_top, 5, (255,0,0), thickness=1)
+
 					# Some drawing to display contour results
 					cv2.circle(display, prev_target_bottom, 5, (0,255,0), thickness=1)
 					cv2.circle(display, current_target_bottom, 5, (0,0,255), thickness=1)
@@ -221,8 +236,8 @@ while True:
 
 					cv2.line(display, (int(width/2), 0), (int(width/2), height), (0,0,0), 4)
 					cv2.line(display, tuple(current_box_top[0]), tuple(current_box_top[1]), (255,0,255), 2)
-					cv2.line(display, tuple(prev_box_top[0]), tuple(prev_box_top[1]), (255,255,0), 2)
-
+					cv2.line(display, tuple(current_box_bottom[0]), tuple(current_box_bottom[1]), (255,255,255), 2)
+					cv2.line(display, tuple(prev_box_top[0]), tuple(prev_box_top[1]), (255,255,255), 2)
 					cv2.circle(display, intersection, 5, (255,255,255), thickness=1)
 
 		previous = cnt  # Re-assign the previous contour
