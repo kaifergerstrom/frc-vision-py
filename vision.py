@@ -7,9 +7,33 @@ import argparse
 import numpy as np
 from networktables import NetworkTables
 from imutils.video import WebcamVideoStream, FPS
+from tuner import load_threshold
 
-# ------------------ FUNCTIONS ------------------
 
+ROBORIO_IP = "10.6.12.2"
+
+PICKLE_PATH = "pickles/"  # Path of folders with pickles
+AREA_LIMIT = 1000  # Limit to find contours with area bigger than limit
+TOLERANCE = 15  # Angle tolerance to consider a "pair"
+
+# Start the webcam feed, and start FPS counter
+vs = WebcamVideoStream(src=0).start()
+fps = FPS().start()
+
+MORPH_KERNEL = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2), anchor=(0,0))  # Define kernel
+
+ap = argparse.ArgumentParser()
+ap.add_argument("-d", "--display", type=int, default=-1, help="Whether or not frames should be displayed")
+ap.add_argument("-t", "--table", type=str, required=True, help="Determine the name of the NetworkTable to push to")
+args = vars(ap.parse_args())
+
+NetworkTables.initialize(server=ROBORIO_IP)  # Initialize NetworkTable server
+sd = NetworkTables.getTable(args["table"])  # Fetch the NetworkTable table
+
+previous = None
+
+
+# Function courtesy of https://www.cs.hmc.edu/ACM/lectures/intersections.html
 def intersectLines(ptA, ptB, ptC, ptD): # Returns intersection point of Line(ptA, ptB) and Line(ptD, ptC)
 
 	DET_TOLERANCE = 0.00000001  # Define determent tolerance
@@ -76,17 +100,6 @@ def order_points(box):  # Recieves dimensions of bounding box, and sorts through
 	return [points[0][0], points[1][0]]  # Return a multi dimensional array with the two points
 
 
-def load_threshold():  # Load pickle files for contour data
-	# Access and fetch two seperate pickle files
-	with open(PICKLE_PATH + "hsv_low.pickle", 'rb') as f:
-		HSV_LOW = pickle.load(f)
-
-	with open(PICKLE_PATH + "hsv_high.pickle", 'rb') as f:
-		HSV_HIGH = pickle.load(f)
-
-	return HSV_LOW, HSV_HIGH
-
-
 def get_box_sides(cnt):
 	box = cv2.minAreaRect(cnt)  # Find the box dimensions of contour
 	box = cv2.boxPoints(box) if imutils.is_cv2() else cv2.boxPoints(box)  # Adjust for rotation
@@ -113,151 +126,127 @@ def find_targets(current_box, prev_box):
 	return tuple(current_target), tuple(prev_target)
 
 
-# ------------------ INITIALIZE VARIABLES ------------------
+def main():
 
-ROBORIO_IP = "10.6.12.2"
+	while True:
 
-PICKLE_PATH = "pickles/"  # Path of folders with pickles
-AREA_LIMIT = 1000  # Limit to find contours with area bigger than limit
-TOLERANCE = 15  # Angle tolerance to consider a "pair"
+		frame = vs.read()  # Fetch the frame from the camera
+		display = frame.copy() # Create a copy of frame for clear display and drawing
 
-# Start the webcam feed, and start FPS counter
-vs = WebcamVideoStream(src=0).start()
-fps = FPS().start()
+		height, width = frame.shape[:2]
 
-MORPH_KERNEL = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2), anchor=(0,0))  # Define kernel
+		hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)  # Convert into HSV readable
 
-ap = argparse.ArgumentParser()
-ap.add_argument("-d", "--display", type=int, default=-1, help="Whether or not frames should be displayed")
-ap.add_argument("-t", "--table", type=str, required=True, help="Determine the name of the NetworkTable to push to")
-args = vars(ap.parse_args())
+		hsv_low, hsv_high = load_threshold()  # Unpack the threshold values
+		mask = cv2.inRange(hsv, hsv_low, hsv_high)  # Filter HSV range
 
-NetworkTables.initialize(server=ROBORIO_IP)  # Initialize NetworkTable server
-sd = NetworkTables.getTable(args["table"])  # Fetch the NetworkTable table
+		# Code that finds contours, filter out sizes, and sort by x position left to right
+		cnts, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)  # Find the contours
+		sorted_cnts = [cnt for cnt in cnts if cv2.contourArea(cnt) >= AREA_LIMIT]  # Filter out small contours
+		sorted_cnts = sorted(sorted_cnts, key=lambda cnt: cv2.boundingRect(cnt)[0])[:4]  # Sort and isolate max of 4 contours
 
-previous = None
+		for count, cnt in enumerate(sorted_cnts):  # Iterate through 4 countours
 
-# ------------------ MAIN LOOP ------------------
+			if (count == 0):  # If its the first contour, just skip it
+				previous = cnt  # Assign the previous with the current and skip to next iteration
+				continue
 
-while True:
+			# Calculate the short sides of the tape
+			side1c, side2c = get_box_sides(cnt)
+			side1p, side2p = get_box_sides(previous)
+			
+			# Calculate the midpoints of the sides of the contour
+			midpoint1c, midpoint2c = midpoint(side1c[0], side1c[1]), midpoint(side2c[0], side2c[1]) # Find the midpoint of each point combinations
+			midpoint1p, midpoint2p = midpoint(side1p[0], side1p[1]), midpoint(side2p[0], side2p[1]) # Find the midpoint of each point combinations
 
-	frame = vs.read()  # Fetch the frame from the camera
-	display = frame.copy() # Create a copy of frame for clear display and drawing
+			# Calculate the angle of the two midpoints
+			angle_prev = find_angle(midpoint1p, midpoint2p)  # Calculate the midpoint
+			angle = find_angle(midpoint1c, midpoint2c)
+			
+			# If the previous angle is negative and next angle positive
+			if (angle_prev < 0 and angle > 0):
+				# Check if angles are within tolerance to be pair
+				if abs(abs(angle_prev) - abs(angle)) < 15:
 
-	height, width = frame.shape[:2]
+					# Determine which side of tape is the uppermost and farthest to left
+					if side1c[0][1] < side2c[0][1]:
+						current_box_bottom = side2c
+						current_box_top = side1c
+					else:
+						current_box_bottom = side1c
+						current_box_top = side2c
 
-	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)  # Convert into HSV readable
+					if side1p[0][1] > side2p[0][1]:
+						prev_box_top = side2p
+						prev_box_bottom = side1p
+					else:
+						prev_box_top = side1p
+						prev_box_bottom = side2p
 
-	hsv_low, hsv_high = load_threshold()  # Unpack the threshold values
-	mask = cv2.inRange(hsv, hsv_low, hsv_high)  # Filter HSV range
+					# Determine the corner target points of each tape contour
+					current_target_top, prev_target_top = find_targets(current_box_top, prev_box_top)
+					current_target_bottom, prev_target_bottom = find_targets(current_box_bottom, prev_box_bottom)
 
-	# Code that finds contours, filter out sizes, and sort by x position left to right
-	cnts, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)  # Find the contours
-	sorted_cnts = [cnt for cnt in cnts if cv2.contourArea(cnt) >= AREA_LIMIT]  # Filter out small contours
-	sorted_cnts = sorted(sorted_cnts, key=lambda cnt: cv2.boundingRect(cnt)[0])[:4]  # Sort and isolate max of 4 contours
+					# Data to send to network tables length of X lines and offset from intersection point of X lines
+					intersection = intersectLines(prev_target_bottom, current_target_top, current_target_bottom, prev_target_top)
+					leftDistance = distance(prev_target_bottom, current_target_top)
+					rightDistance = distance(current_target_bottom, prev_target_top)
+					offset = intersection[0] - (width/2)  # Calculate the offset from the center of the intersection point
 
-	for count, cnt in enumerate(sorted_cnts):  # Iterate through 4 countours
+					# Pass the data through network tables
+					sd.putNumber("offset", offset)  # Push data to table
+					sd.putNumber("leftDistance", leftDistance)  # Push data to table
+					sd.putNumber("rightDistance", rightDistance)  # Push data to table
 
-		if (count == 0):  # If its the first contour, just skip it
-			previous = cnt  # Assign the previous with the current and skip to next iteration
-			continue
+					print("Offset: {}".format(offset))
+					print("Left Tape Distance: {}".format(leftDistance))
+					print("Right Tape Distance: {}".format(rightDistance))
 
-		# Calculate the short sides of the tape
-		side1c, side2c = get_box_sides(cnt)
-		side1p, side2p = get_box_sides(previous)
-		
-		# Calculate the midpoints of the sides of the contour
-		midpoint1c, midpoint2c = midpoint(side1c[0], side1c[1]), midpoint(side2c[0], side2c[1]) # Find the midpoint of each point combinations
-		midpoint1p, midpoint2p = midpoint(side1p[0], side1p[1]), midpoint(side2p[0], side2p[1]) # Find the midpoint of each point combinations
+					if args["display"] > 0:
 
-		# Calculate the angle of the two midpoints
-		angle_prev = find_angle(midpoint1p, midpoint2p)  # Calculate the midpoint
-		angle = find_angle(midpoint1c, midpoint2c)
-		
-		# If the previous angle is negative and next angle positive
-		if (angle_prev < 0 and angle > 0):
-			# Check if angles are within tolerance to be pair
-			if abs(abs(angle_prev) - abs(angle)) < 15:
+						cv2.circle(display, prev_target_bottom, 5, (255,0,0), thickness=1)
+						cv2.circle(display, current_target_top, 5, (0,255,0), thickness=1)
+						cv2.circle(display, current_target_bottom, 5, (0,0,0), thickness=1)
+						cv2.circle(display, prev_target_top, 5, (255,0,0), thickness=1)
 
-				# Determine which side of tape is the uppermost and farthest to left
-				if side1c[0][1] < side2c[0][1]:
-					current_box_bottom = side2c
-					current_box_top = side1c
-				else:
-					current_box_bottom = side1c
-					current_box_top = side2c
+						# Some drawing to display contour results
+						cv2.circle(display, prev_target_bottom, 5, (0,255,0), thickness=1)
+						cv2.circle(display, current_target_bottom, 5, (0,0,255), thickness=1)
+						cv2.line(display, current_target_bottom, prev_target_bottom, (0,0,255), 4)
 
-				if side1p[0][1] > side2p[0][1]:
-					prev_box_top = side2p
-					prev_box_bottom = side1p
-				else:
-					prev_box_top = side1p
-					prev_box_bottom = side2p
+						cv2.circle(display, prev_target_top, 5, (0,255,0), thickness=1)
+						cv2.circle(display, current_target_top, 5, (0,0,255), thickness=1)
+						cv2.line(display, current_target_top, prev_target_top, (0,0,255), 4)
 
-				# Determine the corner target points of each tape contour
-				current_target_top, prev_target_top = find_targets(current_box_top, prev_box_top)
-				current_target_bottom, prev_target_bottom = find_targets(current_box_bottom, prev_box_bottom)
+						cv2.line(display, prev_target_bottom, current_target_top, (255,255,255), 4)
+						cv2.line(display, current_target_bottom, prev_target_top, (0,0,255), 4)
 
-				# Data to send to network tables length of X lines and offset from intersection point of X lines
-				intersection = intersectLines(prev_target_bottom, current_target_top, current_target_bottom, prev_target_top)
-				leftDistance = distance(prev_target_bottom, current_target_top)
-				rightDistance = distance(current_target_bottom, prev_target_top)
-				offset = intersection[0] - (width/2)  # Calculate the offset from the center of the intersection point
+						cv2.line(display, (int(width/2), 0), (int(width/2), height), (0,0,0), 4)
+						cv2.line(display, tuple(current_box_top[0]), tuple(current_box_top[1]), (255,0,255), 2)
+						cv2.line(display, tuple(current_box_bottom[0]), tuple(current_box_bottom[1]), (255,255,255), 2)
+						cv2.line(display, tuple(prev_box_top[0]), tuple(prev_box_top[1]), (255,255,255), 2)
+						cv2.circle(display, intersection, 5, (255,255,255), thickness=1)
 
-				# Pass the data through network tables
-				sd.putNumber("offset", offset)  # Push data to table
-				sd.putNumber("leftDistance", leftDistance)  # Push data to table
-				sd.putNumber("rightDistance", rightDistance)  # Push data to table
+			previous = cnt  # Re-assign the previous contour
 
-				print(offset)
-				print(leftDistance)
-				print(rightDistance)
-				print("-----------")
+		# Display the frames
+		cv2.imshow('Mask', mask)
+		cv2.imshow('Frame', display)
 
-				if args["display"] > 0:
+		k = cv2.waitKey(5) & 0xFF
+
+		if k == 27:  # If ESC is clicked, end the loop 
+			break
+
+		fps.update()  # Update FPS
+
+	fps.stop()
+	print("[INFO] elasped time: {:.2f}".format(fps.elapsed()))
+	print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
+
+	cv2.destroyAllWindows()
+	vs.stop()
 
 
-					cv2.circle(display, prev_target_bottom, 5, (255,0,0), thickness=1)
-					cv2.circle(display, current_target_top, 5, (0,255,0), thickness=1)
-					cv2.circle(display, current_target_bottom, 5, (0,0,0), thickness=1)
-					cv2.circle(display, prev_target_top, 5, (255,0,0), thickness=1)
-
-					# Some drawing to display contour results
-					cv2.circle(display, prev_target_bottom, 5, (0,255,0), thickness=1)
-					cv2.circle(display, current_target_bottom, 5, (0,0,255), thickness=1)
-					cv2.line(display, current_target_bottom, prev_target_bottom, (0,0,255), 4)
-
-					cv2.circle(display, prev_target_top, 5, (0,255,0), thickness=1)
-					cv2.circle(display, current_target_top, 5, (0,0,255), thickness=1)
-					cv2.line(display, current_target_top, prev_target_top, (0,0,255), 4)
-
-					cv2.line(display, prev_target_bottom, current_target_top, (255,255,255), 4)
-					cv2.line(display, current_target_bottom, prev_target_top, (0,0,255), 4)
-
-					cv2.line(display, (int(width/2), 0), (int(width/2), height), (0,0,0), 4)
-					cv2.line(display, tuple(current_box_top[0]), tuple(current_box_top[1]), (255,0,255), 2)
-					cv2.line(display, tuple(current_box_bottom[0]), tuple(current_box_bottom[1]), (255,255,255), 2)
-					cv2.line(display, tuple(prev_box_top[0]), tuple(prev_box_top[1]), (255,255,255), 2)
-					cv2.circle(display, intersection, 5, (255,255,255), thickness=1)
-
-		previous = cnt  # Re-assign the previous contour
-
-	# Display the frames
-	cv2.imshow('Mask', mask)
-	cv2.imshow('Frame', display)
-
-	k = cv2.waitKey(5) & 0xFF
-
-	if k == 27:  # If ESC is clicked, end the loop 
-		break
-
-	fps.update()  # Update FPS
-
-fps.stop()
-print("[INFO] elasped time: {:.2f}".format(fps.elapsed()))
-print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
-
-cv2.destroyAllWindows()
-vs.stop()
-
-		
+if __name__ == "__main__":
+	main()

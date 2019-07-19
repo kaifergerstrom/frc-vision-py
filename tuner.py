@@ -1,30 +1,36 @@
 from imutils.video import WebcamVideoStream, FPS
-import imutils
 import cv2
-from classes.ImageProcessor import ImageProcessor
+import pickle
 
-# Start the webcam feed, and start FPS counter
-vs = WebcamVideoStream(src=0).start()
-fps = FPS().start()
 
-image_processor = ImageProcessor()  # Create an object of the ImageProcessor class
+PICKLE_PATH = "pickles/"  # Path of folders with pickles
 
-def slider_init():  # Set the value of the HSV sliders to the current values
-	THRESH_LOW, THRESH_HIGH = image_processor.unpack_threshold_values()  # Unpack the thresholds
-	h1, s1, v1 = THRESH_LOW  # Parse data into lower half
-	h2, s2, v2 = THRESH_HIGH  # Parse data into upper half
 
-	# Set values of lower sliders
-	cv2.setTrackbarPos("H", "slider", h1)
-	cv2.setTrackbarPos("S", "slider", s1)
-	cv2.setTrackbarPos("V", "slider", v1)
+def save_threshold_values(thresh_low, thresh_high):  # Function that will update the pickle values for the HSV thresholds
+		
+		# Create and update two seperate pickle files
+		with open(PICKLE_PATH + "hsv_low.pickle", 'wb') as f:
+			pickle.dump(thresh_low, f)
+			THRESH_LOW = thresh_low
 
-	# Set values of higher sliders
-	cv2.setTrackbarPos("H2", "slider", h2)
-	cv2.setTrackbarPos("S2", "slider", s2)
-	cv2.setTrackbarPos("V2", "slider", v2)
+		with open(PICKLE_PATH + "hsv_high.pickle", 'wb') as f:
+			pickle.dump(thresh_high, f)
+			THRESH_HIGH = thresh_high
 
-def slider_frame():  # Create sliders for HSV values
+
+def load_threshold():  # Load pickle files for contour data
+	# Access and fetch two seperate pickle files
+	with open(PICKLE_PATH + "hsv_low.pickle", 'rb') as f:
+		HSV_LOW = pickle.load(f)
+
+	with open(PICKLE_PATH + "hsv_high.pickle", 'rb') as f:
+		HSV_HIGH = pickle.load(f)
+
+	return HSV_LOW, HSV_HIGH
+
+
+def create_hsv_slider():  # Create sliders for HSV values
+
 	cv2.namedWindow("slider")  # Create a window for sliders
 
 	# Lower slider values
@@ -37,15 +43,31 @@ def slider_frame():  # Create sliders for HSV values
 	cv2.createTrackbar("S2", "slider", 0, 255, lambda *args: None)
 	cv2.createTrackbar("V2", "slider", 0, 255, lambda *args: None)
 
-	slider_init()
+	hsv_low, hsv_high = load_threshold()  # Load the current HSV thresholds
+
+	# Set values of lower sliders
+	cv2.setTrackbarPos("H", "slider", hsv_low[0])
+	cv2.setTrackbarPos("S", "slider", hsv_low[1])
+	cv2.setTrackbarPos("V", "slider", hsv_low[2])
+
+	# Set values of higher sliders
+	cv2.setTrackbarPos("H2", "slider", hsv_high[0])
+	cv2.setTrackbarPos("S2", "slider", hsv_high[1])
+	cv2.setTrackbarPos("V2", "slider", hsv_high[2])
+
 
 def main():
 
-	slider_frame()
+	# Start the webcam feed, and start FPS counter
+	vs = WebcamVideoStream(src=0).start()
+	fps = FPS().start()
+
+	create_hsv_slider()
 
 	while True:
 
 		frame = vs.read()  # Fetch the frame from the camera
+		display = frame.copy() # Create a copy of frame for clear display and drawing
 
 		# Fetch values from sliders
 		h1 = cv2.getTrackbarPos('H', 'slider')
@@ -56,11 +78,9 @@ def main():
 		s2 = cv2.getTrackbarPos('S2', 'slider')
 		v2 = cv2.getTrackbarPos('V2', 'slider')
 
-		mask = image_processor.threshold(frame, (h1,s1,v1), (h2,s2,v2))  # Apply threshold
-
 		# Display the frames
-		cv2.imshow('Vision Tuner', frame)
-		cv2.imshow('Vision Mask', mask)
+		#cv2.imshow('Mask', mask)
+		cv2.imshow('Frame', display)
 
 		k = cv2.waitKey(5) & 0xFF
 
@@ -68,7 +88,7 @@ def main():
 			break
 
 		if k == ord('s'):  # If S is clicked, save the hsv values
-			image_processor.save_threshold_values((h1,s1,v1),(h2,s2,v2))  # Save the values
+			save_threshold_values((h1,s1,v1),(h2,s2,v2))  # Save the values
 			print("Saved current HSV config: low: ({},{},{}), high: ({},{},{})".format(h1, s1, v1, h2, s2, v2))
 
 		fps.update()  # Update FPS
@@ -80,5 +100,6 @@ def main():
 	cv2.destroyAllWindows()
 	vs.stop()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
 	main()
