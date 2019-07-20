@@ -229,14 +229,17 @@ def main():
 
 			previous = cnt  # Re-assign the previous contour
 
-		# Display the frames
-		cv2.imshow('Mask', mask)
-		cv2.imshow('Frame', display)
+		if args["display"] > 0:
 
-		k = cv2.waitKey(5) & 0xFF
+			# Display the frames
+			cv2.imshow('Mask', mask)
+			cv2.imshow('Frame', display)
 
-		if k == 27:  # If ESC is clicked, end the loop 
-			break
+			k = cv2.waitKey(5) & 0xFF
+
+			if k == 27:  # If ESC is clicked, end the loop 
+				break
+
 
 		fps.update()  # Update FPS
 
