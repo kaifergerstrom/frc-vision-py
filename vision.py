@@ -141,7 +141,7 @@ def main():
 		mask = cv2.inRange(hsv, hsv_low, hsv_high)  # Filter HSV range
 
 		# Code that finds contours, filter out sizes, and sort by x position left to right
-		cnts, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)  # Find the contours
+		image, cnts, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)  # Find the contours
 		sorted_cnts = [cnt for cnt in cnts if cv2.contourArea(cnt) >= AREA_LIMIT]  # Filter out small contours
 		sorted_cnts = sorted(sorted_cnts, key=lambda cnt: cv2.boundingRect(cnt)[0])[:4]  # Sort and isolate max of 4 contours
 
