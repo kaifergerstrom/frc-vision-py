@@ -1,0 +1,10 @@
+[Unit]
+Description=Vision Startup
+
+[Service]
+Type=forking
+User=team612
+ExecStart=/home/team612/Desktop/FRC2019Vision/startup/vision_startup.sh
+
+[Install]
+WantedBy=multi-user.target
