@@ -7,7 +7,5 @@ Python-side of vision algrorithm to detect reflective tape and send data to ROBO
 3) Determines tape pairs based on opposite negative/positive angles
 4) Find the outer vertex points of each tape in pair.
 5) Determines intersection point of vectors formed by top vertex and bottom vertex of opposite tapes.
-6) Returns offset of intersection point from center, and length of each vector.
-
-<!--  ![](header.png)  - Input image -->
+6) Returns offset of intersection point from center, and length of each vector
 
